@@ -12,10 +12,10 @@ export class Gps {
       this.pos = { lat: ll[0], lng: ll[1], acc: p.coords.accuracy, speed: p.coords.speed, t: p.timestamp };
       if (!this.marker) {
         this.circle = L.circle(ll, { radius: p.coords.accuracy, color: '#2563eb', weight: 1, fillOpacity: .1 }).addTo(this.map);
-        this.marker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(this.map);
+        this.marker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false, keyboard: false, zIndexOffset: -100 }).addTo(this.map);
       }
       this.marker.setLatLng(ll); this.circle.setLatLng(ll).setRadius(p.coords.accuracy);
-      if (first) this.map.setView(ll, 16); else if (this.follow) this.map.panTo(ll);
+      if (first) this.map.setView(ll, 16); else if (this.follow && !this.map.getBounds().pad(-0.25).contains(ll)) this.map.panTo(ll, { animate: false });
       onUpdate(this.pos);
     }, e => onError(e.code === 1 ? 'Permiso de ubicación denegado' : 'No se pudo obtener la ubicación'),
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 });

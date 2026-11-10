@@ -11,7 +11,7 @@ const fmt = d => d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-dig
 const min = s => Math.max(1, Math.round(s / 60));
 const msg = t => { $('#msg').textContent = t; };
 
-const map = L.map('map', { maxBounds: CONFIG.bounds, minZoom: 11, zoomControl: false }).setView(CONFIG.center, CONFIG.zoom);
+const map = L.map('map', { maxBounds: CONFIG.bounds, minZoom: 12, zoomControl: false }).setView(CONFIG.center, CONFIG.zoom);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
 const sim = new Simulator(map), gps = new Gps(map);
@@ -22,7 +22,9 @@ let activeId = null, currentId = null, saved = [], autoStart = false, seq = 0, t
 const mkSlot = role => ({ id: ++uid, role, text: '', pt: null });   // pt = {lat, lng, label}
 const stopsOf = () => slots.filter(s => s.role === 'stop');
 const slotById = id => slots.find(s => s.id === id);
-const pin = (t, c = '') => L.divIcon({ className: '', html: `<div class="pin ${c}">${t}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
+const pin = (t, c = '') => c === 'start'
+  ? L.divIcon({ className: '', html: '<div class="pin start"></div>', iconSize: [30, 30], iconAnchor: [15, 29] })
+  : L.divIcon({ className: '', html: `<div class="pin ${c}">${t}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
 const rowEl = s => document.querySelector(`.prow[data-id="${s.id}"]`);
 
 /* ---------- Mapa y seguimiento GPS ---------- */
@@ -32,17 +34,27 @@ $('#recenter').onclick = () => {
   gps.follow = true; $('#recenter').hidden = true;
   if (gps.pos) map.setView([gps.pos.lat, gps.pos.lng], Math.max(map.getZoom(), 16));
 };
+let bestAcc = Infinity;
 gps.start(p => {
-  if (autoStart) return;
-  autoStart = true;
   const s = slots[0];
-  if (!s.pt && !s.text) startFromGps();
+  if (!autoStart) {
+    autoStart = true;
+    if (!s.pt && !s.text) {
+      startFromGps();
+      if (p.acc > 150) msg(`Ubicación aproximada (±${Math.round(p.acc)} m). Es normal en computadores; en un celular con GPS es mucho más precisa. Puedes arrastrar el pin para corregirla.`);
+    }
+  } else if (s.auto && s.pt && !result && p.acc < bestAcc * 0.7) {   // mientras el inicio sea automático, lo afina
+    bestAcc = p.acc; s.pt.lat = p.lat; s.pt.lng = p.lng;
+    ensureMarker(s); invalidate(); addressOf(s, 'Mi ubicación');
+    if (p.acc <= 150) msg('');
+  }
 }, err => msg(err + '. Activa la ubicación para ver dónde estás.'));
 
 function startFromGps() {
   if (!gps.pos) return;
   const s = slots[0];
   setPoint(s, gps.pos.lat, gps.pos.lng, 'Mi ubicación');
+  s.auto = true; bestAcc = gps.pos.acc;
   addressOf(s, 'Mi ubicación');
 }
 
@@ -51,7 +63,7 @@ function ensureMarker(s) {
   if (markers.has(s.id)) { markers.get(s.id).setLatLng([s.pt.lat, s.pt.lng]); return; }
   const m = L.marker([s.pt.lat, s.pt.lng], { draggable: true }).addTo(map);
   m.on('dragend', () => {
-    const q = m.getLatLng(); s.pt.lat = q.lat; s.pt.lng = q.lng; invalidate();
+    const q = m.getLatLng(); s.pt.lat = q.lat; s.pt.lng = q.lng; s.auto = false; invalidate();
     addressOf(s);
   });
   markers.set(s.id, m);
@@ -59,7 +71,7 @@ function ensureMarker(s) {
 const dropMarker = s => { markers.get(s.id)?.remove(); markers.delete(s.id); };
 
 function setPoint(s, lat, lng, label) {
-  s.pt = { lat, lng, label }; s.text = label;
+  s.pt = { lat, lng, label }; s.text = label; s.auto = false;
   ensureMarker(s); invalidate(); render();
 }
 function clearPoint(s) { s.pt = null; dropMarker(s); invalidate(); }
@@ -143,7 +155,7 @@ $('#points').addEventListener('focusout', e => { const u = e.target.closest('.pr
 $('#points').addEventListener('input', e => {
   if (e.target.tagName !== 'INPUT') return;
   const row = e.target.closest('.prow'), s = slotById(+row.dataset.id);
-  s.text = e.target.value;
+  s.text = e.target.value; s.auto = false;
   if (s.pt) clearPoint(s);
   clearTimeout(timer);
   const q = s.text.trim();
@@ -204,7 +216,7 @@ const li = (cls, n, label, sub, t) =>
 
 function showResult() {
   const { order, legs, geometry, pts } = result;
-  line = L.layerGroup([L.polyline(geometry, { color: '#fff', weight: 10, opacity: .9 }), L.polyline(geometry, { color: '#111', weight: 5 })]).addTo(map);
+  line = L.layerGroup([L.polyline(geometry, { color: '#fff', weight: 10, opacity: .9 }), L.polyline(geometry, { color: '#2563eb', weight: 5 })]).addTo(map);
   freeMap();
   const wide = innerWidth > 700;
   map.fitBounds(L.polyline(geometry).getBounds(), { paddingTopLeft: [wide ? 420 : 30, 30], paddingBottomRight: [30, wide ? 30 : innerHeight * .55] });
