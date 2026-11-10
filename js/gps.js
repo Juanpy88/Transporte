@@ -1,6 +1,6 @@
 // Ubicación en vivo del dispositivo (Geolocation API). Requiere HTTPS o localhost.
 export class Gps {
-  constructor(map) { this.map = map; this.id = null; this.pos = null; this.follow = false; this.marker = null; this.circle = null; this.lock = null; }
+  constructor(map) { this.map = map; this.id = null; this.pos = null; this.follow = true; this.marker = null; this.circle = null; this.lock = null; }
   get active() { return this.id !== null; }
 
   start(onUpdate, onError) {

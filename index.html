@@ -8,60 +8,51 @@
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+<div id="map"></div>
+<button id="recenter" title="Centrar en mi ubicación" hidden>⌖</button>
+
 <aside id="panel">
-  <h1>Rutas Antofagasta</h1>
-  <p id="editing" class="hint">Ruta nueva (sin guardar)</p>
+  <div id="viewPlan">
+    <header>
+      <h1>Planificar ruta</h1>
+      <div><button id="newRoute">Nueva</button> <button id="openSaved">Guardadas</button></div>
+    </header>
+    <p id="editing" class="sub">Ruta nueva (sin guardar)</p>
 
-  <details open><summary>Puntos</summary>
-    <div class="row">
-      <select id="target">
-        <option value="stop">Agregar como: Parada</option>
-        <option value="start">Agregar como: Punto de partida</option>
-        <option value="end">Agregar como: Punto de dejada</option>
-      </select>
-    </div>
-    <div class="row"><input id="q" placeholder="Buscar dirección y Enter"></div>
-    <ul id="results"></ul>
-    <p class="hint">Busca o haz clic en el mapa. Arrastra los pines para corregirlos. El inicio queda primero y el punto de dejada último.</p>
-    <ul id="stops"></ul>
-  </details>
+    <div id="points"></div>
+    <p id="hint" class="hint" hidden>Toca el mapa para fijar este punto.</p>
 
-  <details open><summary>Ruta</summary>
-    <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
-    <label><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
-    <div class="row">
-      <button id="calc" class="primary">Calcular ruta</button>
-      <button id="clear">Nueva ruta</button>
+    <div class="opts">
+      <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
+      <label>Min. por parada <input id="service" type="number" min="0" value="5"></label>
     </div>
-    <p id="msg"></p>
-    <div id="summary"></div>
-    <table id="eta"></table>
-    <div class="row">
-      <button id="sim">Simular recorrido</button>
-      <select id="speed"><option value="30">x30</option><option value="60" selected>x60</option><option value="180">x180</option></select>
-    </div>
-    <p id="simInfo"></p>
-  </details>
+    <label class="check"><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
+    <button id="calc" class="cta">Calcular ruta</button>
+    <p id="msg" class="hint"></p>
 
-  <details><summary>GPS</summary>
-    <div class="row">
-      <button id="gpsBtn">Activar GPS</button>
-      <button id="gpsStart" disabled>Usar como inicio</button>
+    <div id="result" hidden>
+      <div id="summary" class="sub"></div>
+      <ul id="eta"></ul>
+      <div class="save">
+        <button id="sim">Simular recorrido</button>
+        <select id="speed"><option value="30">x30</option><option value="60" selected>x60</option><option value="180">x180</option></select>
+      </div>
+      <p id="simInfo" class="hint"></p>
     </div>
-    <label><input id="follow" type="checkbox"> Seguir mi ubicación en el mapa</label>
-    <p id="gpsInfo" class="hint"></p>
-  </details>
 
-  <details open><summary>Rutas guardadas</summary>
-    <div class="row"><input id="rname" placeholder="Nombre de la ruta"></div>
-    <div class="row">
-      <button id="save" class="primary">Guardar</button>
+    <div class="save">
+      <input id="rname" placeholder="Nombre de la ruta">
+      <button id="save">Guardar</button>
       <button id="saveNew">Guardar como nueva</button>
     </div>
+  </div>
+
+  <div id="viewSaved" hidden>
+    <header><h1>Rutas guardadas</h1><button id="back">Volver</button></header>
     <ul id="saved"></ul>
-  </details>
+  </div>
 </aside>
-<div id="map"></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
