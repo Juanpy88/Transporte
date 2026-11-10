@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rutas Antofagasta</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<aside id="panel">
+  <h1>Rutas Antofagasta</h1>
+  <div class="row">
+    <input id="q" placeholder="Buscar dirección y Enter">
+  </div>
+  <ul id="results"></ul>
+  <p class="hint">También puedes hacer clic en el mapa para agregar una parada. La primera es el inicio. Arrastra los pines para corregirlos.</p>
+
+  <h2>Paradas</h2>
+  <ol id="stops"></ol>
+
+  <h2>Opciones</h2>
+  <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
+  <label><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
+  <label><input id="roundtrip" type="checkbox"> Volver al punto de inicio</label>
+  <div class="row">
+    <button id="calc" class="primary">Calcular ruta</button>
+    <button id="clear">Limpiar</button>
+  </div>
+  <p id="msg"></p>
+
+  <div id="summary"></div>
+  <table id="eta"></table>
+
+  <h2>Simulación</h2>
+  <div class="row">
+    <button id="sim">Simular recorrido</button>
+    <select id="speed">
+      <option value="30">x30</option>
+      <option value="60" selected>x60</option>
+      <option value="180">x180</option>
+    </select>
+  </div>
+  <p id="simInfo"></p>
+</aside>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
