@@ -1,13 +1,12 @@
 // Proveedor gratuito: servidor demo público de OSRM (sin clave, sin tráfico, solo para pruebas).
 const BASE = 'https://router.project-osrm.org';
 
-export async function solve(points, { optimize, roundtrip }) {
+export async function solve(points, { optimize, fixedEnd }) {
   const coords = points.map(p => `${p.lng},${p.lat}`).join(';');
   const common = 'overview=full&geometries=geojson&steps=false';
   const url = optimize
-    ? `${BASE}/trip/v1/driving/${coords}?${common}&source=first&roundtrip=${roundtrip}` +
-      (roundtrip ? '' : '&destination=any')
-    : `${BASE}/route/v1/driving/${coords}${roundtrip ? ';' + points[0].lng + ',' + points[0].lat : ''}?${common}`;
+    ? `${BASE}/trip/v1/driving/${coords}?${common}&roundtrip=false&source=first&destination=${fixedEnd ? 'last' : 'any'}`
+    : `${BASE}/route/v1/driving/${coords}?${common}`;
 
   const res = await fetch(url);
   if (!res.ok) throw new Error('Error del servicio de rutas (' + res.status + ')');

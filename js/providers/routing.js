@@ -6,11 +6,11 @@ import * as osrm from './osrm.js';
 const providers = { osrm /*, ors, google, mapbox */ };
 export const routing = providers[CONFIG.provider];
 
-/* Contrato de solve(points, { optimize, roundtrip }):
-   points: [{lat, lng}] (el índice 0 es el inicio)
+/* Contrato de solve(points, { optimize, fixedEnd }):
+   points: [{lat, lng}]. El índice 0 es el inicio fijo; si fixedEnd es true,
+           el último punto es el destino fijo.
    devuelve: {
-     order:    [índices de points en el orden de visita, empezando en 0],
-     legs:     [{duration (s), distance (m)}] un tramo por cada salto del orden
-               (si roundtrip, incluye el tramo de regreso),
-     geometry: [[lat, lng], ...] trazado completo de la ruta
+     order:    [índices de points en orden de visita],
+     legs:     [{duration (s), distance (m)}] un tramo por cada salto del orden,
+     geometry: [[lat, lng], ...] trazado completo
    } */

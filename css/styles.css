@@ -25,3 +25,12 @@ table{width:100%;border-collapse:collapse;margin-top:6px}
 td,th{padding:4px;border-bottom:1px solid var(--line);text-align:left;font-size:12px}
 .pin{background:var(--accent);color:#fff;border:2px solid #fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px}
 @media(max-width:700px){body{flex-direction:column-reverse}#panel{width:100%;max-width:none;height:50%}#map{height:50%;flex:none}}
+details{border-top:1px solid var(--line);padding:8px 0}
+summary{font-weight:600;cursor:pointer}
+.pin.start{background:#16a34a}.pin.end{background:#dc2626}
+.tag{min-width:48px;font-size:11px;color:var(--muted);align-self:center}
+.tag.start{color:#16a34a}.tag.end{color:#dc2626}
+#stops,#saved{list-style:none;padding:0;margin:0}
+#saved li{border:1px solid var(--line);border-radius:6px;padding:6px;margin:4px 0}
+#saved .meta{color:var(--muted);font-size:12px}
+#saved button{padding:2px 6px;font-size:12px;margin-right:4px;margin-top:4px}

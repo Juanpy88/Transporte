@@ -10,38 +10,56 @@
 <body>
 <aside id="panel">
   <h1>Rutas Antofagasta</h1>
-  <div class="row">
-    <input id="q" placeholder="Buscar dirección y Enter">
-  </div>
-  <ul id="results"></ul>
-  <p class="hint">También puedes hacer clic en el mapa para agregar una parada. La primera es el inicio. Arrastra los pines para corregirlos.</p>
+  <p id="editing" class="hint">Ruta nueva (sin guardar)</p>
 
-  <h2>Paradas</h2>
-  <ol id="stops"></ol>
+  <details open><summary>Puntos</summary>
+    <div class="row">
+      <select id="target">
+        <option value="stop">Agregar como: Parada</option>
+        <option value="start">Agregar como: Punto de partida</option>
+        <option value="end">Agregar como: Punto de dejada</option>
+      </select>
+    </div>
+    <div class="row"><input id="q" placeholder="Buscar dirección y Enter"></div>
+    <ul id="results"></ul>
+    <p class="hint">Busca o haz clic en el mapa. Arrastra los pines para corregirlos. El inicio queda primero y el punto de dejada último.</p>
+    <ul id="stops"></ul>
+  </details>
 
-  <h2>Opciones</h2>
-  <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
-  <label><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
-  <label><input id="roundtrip" type="checkbox"> Volver al punto de inicio</label>
-  <div class="row">
-    <button id="calc" class="primary">Calcular ruta</button>
-    <button id="clear">Limpiar</button>
-  </div>
-  <p id="msg"></p>
+  <details open><summary>Ruta</summary>
+    <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
+    <label><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
+    <div class="row">
+      <button id="calc" class="primary">Calcular ruta</button>
+      <button id="clear">Nueva ruta</button>
+    </div>
+    <p id="msg"></p>
+    <div id="summary"></div>
+    <table id="eta"></table>
+    <div class="row">
+      <button id="sim">Simular recorrido</button>
+      <select id="speed"><option value="30">x30</option><option value="60" selected>x60</option><option value="180">x180</option></select>
+    </div>
+    <p id="simInfo"></p>
+  </details>
 
-  <div id="summary"></div>
-  <table id="eta"></table>
+  <details><summary>GPS</summary>
+    <div class="row">
+      <button id="gpsBtn">Activar GPS</button>
+      <button id="gpsStart" disabled>Usar como inicio</button>
+    </div>
+    <label><input id="follow" type="checkbox"> Seguir mi ubicación en el mapa</label>
+    <p id="gpsInfo" class="hint"></p>
+  </details>
 
-  <h2>Simulación</h2>
-  <div class="row">
-    <button id="sim">Simular recorrido</button>
-    <select id="speed">
-      <option value="30">x30</option>
-      <option value="60" selected>x60</option>
-      <option value="180">x180</option>
-    </select>
-  </div>
-  <p id="simInfo"></p>
+  <details open><summary>Rutas guardadas</summary>
+    <div class="row"><input id="rname" placeholder="Nombre de la ruta"></div>
+    <div class="row">
+      <button id="save" class="primary">Guardar</button>
+      <button id="saveNew">Guardar como nueva</button>
+    </div>
+    <ul id="saved"></ul>
+  </details>
 </aside>
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
