@@ -1,7 +1,7 @@
 // Guardado de rutas. Hoy usa localStorage (solo en este navegador y dispositivo).
 // Para migrar a Supabase u otra base de datos: reimplementar estas 3 funciones
 // con la misma forma (todas async) y el resto de la app no cambia.
-const KEY = 'antofa-rutas:v1';
+const KEY = 'antofa-rutas:v2';
 const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
 const write = l => localStorage.setItem(KEY, JSON.stringify(l));
 

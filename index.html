@@ -2,58 +2,72 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rutas Antofagasta</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reparto Antofagasta</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <div id="map"></div>
+<div id="banner" hidden><span>Toca el mapa para fijar la ubicación</span><button id="bannerX">Cancelar</button></div>
 <button id="recenter" title="Centrar en mi ubicación" hidden>⌖</button>
+<div id="toast" hidden></div>
 
-<aside id="panel">
-  <div id="viewPlan">
-    <header>
-      <h1>Planificar ruta</h1>
-      <div><button id="newRoute">Nueva</button> <button id="openSaved">Guardadas</button></div>
-    </header>
-    <p id="editing" class="sub">Ruta nueva (sin guardar)</p>
+<nav id="tabs">
+  <button data-tab="map">Mapa</button>
+  <button data-tab="stops" class="on">Paradas <i id="cStops"></i></button>
+  <button data-tab="route">Ruta</button>
+  <button data-tab="saved">Guardadas</button>
+</nav>
 
-    <div id="points"></div>
-    <p id="hint" class="hint" hidden>Toca el mapa para fijar este punto.</p>
+<main id="panel">
+  <section id="v-stops">
+    <div id="chips" class="chips"></div>
+    <div id="base"></div>
+    <div class="bar"><input id="filter" type="search" placeholder="Buscar cliente o dirección"><button id="add" class="pri">+ Agregar</button></div>
+    <div class="bar"><button id="imp">Importar Excel</button><button id="tpl" class="link">Plantilla</button><button id="clr" class="link">Vaciar</button></div>
+    <div id="prog" hidden><span id="progTxt"></span><button id="progX" class="link">Detener</button><div class="track"><i id="progBar"></i></div></div>
+    <ul id="list"></ul>
+  </section>
 
+  <section id="v-route" hidden>
     <div class="opts">
-      <label>Hora de salida <input id="depart" type="time" value="08:00"></label>
-      <label>Min. por parada <input id="service" type="number" min="0" value="5"></label>
+      <label>Salida <input id="depart" type="time" value="08:00"></label>
+      <label>Min. por parada <input id="service" type="number" min="0" value="3"></label>
     </div>
     <label class="check"><input id="optimize" type="checkbox" checked> Optimizar el orden de las paradas</label>
     <button id="calc" class="cta">Calcular ruta</button>
-    <p id="msg" class="hint"></p>
+    <div id="rsum" hidden></div>
+    <ul id="rlist"></ul>
+    <button id="exp" hidden>Exportar a Excel</button>
+  </section>
 
-    <div id="result" hidden>
-      <div id="summary" class="sub"></div>
-      <ul id="eta"></ul>
-      <div class="save">
-        <button id="sim">Simular recorrido</button>
-        <select id="speed"><option value="30">x30</option><option value="60" selected>x60</option><option value="180">x180</option></select>
-      </div>
-      <p id="simInfo" class="hint"></p>
-    </div>
-
-    <div class="save">
-      <input id="rname" placeholder="Nombre de la ruta">
-      <button id="save">Guardar</button>
-      <button id="saveNew">Guardar como nueva</button>
-    </div>
-  </div>
-
-  <div id="viewSaved" hidden>
-    <header><h1>Rutas guardadas</h1><button id="back">Volver</button></header>
+  <section id="v-saved" hidden>
+    <p id="editing" class="sub"></p>
+    <input id="rname" placeholder="Nombre de la jornada">
+    <div class="bar"><button id="save" class="pri">Guardar</button><button id="saveNew">Guardar como nueva</button><button id="newDay" class="link">Nueva jornada</button></div>
     <ul id="saved"></ul>
+  </section>
+</main>
+
+<div id="sheet" hidden>
+  <div class="card">
+    <header><h2 id="shTitle"></h2><button id="shX" class="link">Cerrar</button></header>
+    <label>Dirección<input id="fAddr" autocomplete="off" placeholder="Calle y número"></label>
+    <ul id="fSugg"></ul>
+    <div class="bar"><button id="fMap">Fijar en el mapa</button><button id="fGps" hidden>Mi ubicación</button><span id="fLoc"></span></div>
+    <div id="fExtra">
+      <label>Cliente<input id="fClient"></label>
+      <div class="two"><label>Teléfono<input id="fPhone" type="tel"></label><label>Paquetes<input id="fPk" type="number" min="1" value="1"></label></div>
+      <label>Notas<input id="fNotes" placeholder="Ej: dejar con conserje"></label>
+    </div>
+    <div class="bar"><button id="fSave" class="cta">Guardar</button><button id="fDel" class="danger">Eliminar</button></div>
   </div>
-</aside>
+</div>
+<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

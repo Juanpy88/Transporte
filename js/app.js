@@ -1,319 +1,316 @@
 import { CONFIG } from './config.js';
 import { routing } from './providers/routing.js';
 import { search, reverse } from './providers/geocoder.js';
-import { Simulator } from './simulator.js';
 import { Gps } from './gps.js';
 import { storage } from './storage.js';
+import { readRows, locate, template, exportRoute } from './importer.js';
 
 const $ = s => document.querySelector(s);
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = d => d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-const min = s => Math.max(1, Math.round(s / 60));
-const msg = t => { $('#msg').textContent = t; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const hhmm = d => new Date(d).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+const dur = m => m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`;
+const nid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const loc = s => s.lat != null;
+const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
+let tt; const toast = t => { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(tt); tt = setTimeout(() => { e.hidden = true; }, 4500); };
 
+/* ---------- Estado (la jornada actual se guarda sola como borrador) ---------- */
+const DRAFT = 'antofa-rutas:draft';
+const fresh = () => ({ start: null, end: null, stops: [], route: null, opts: { depart: '08:00', service: 3, optimize: true }, name: '', savedId: null });
+let S = fresh();
+try { Object.assign(S, JSON.parse(localStorage.getItem(DRAFT)) || {}); } catch { /* borrador dañado */ }
+let pt; const persist = () => { clearTimeout(pt); pt = setTimeout(() => { try { localStorage.setItem(DRAFT, JSON.stringify(S)); } catch { toast('No hay espacio para guardar el borrador.'); } }, 300); };
+const commit = () => { persist(); renderAll(); };
+let onlyWarn = false, tab = 'stops', saved = [];
+
+/* ---------- Mapa ---------- */
 const map = L.map('map', { maxBounds: CONFIG.bounds, minZoom: 12, zoomControl: false }).setView(CONFIG.center, CONFIG.zoom);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
-const sim = new Simulator(map), gps = new Gps(map);
+const gps = new Gps(map), layer = L.layerGroup().addTo(map);
 
-let uid = 0, slots = [], markers = new Map(), line = null, result = null;
-let activeId = null, currentId = null, saved = [], autoStart = false, seq = 0, timer = null, cur = { id: 0, items: [] };
-
-const mkSlot = role => ({ id: ++uid, role, text: '', pt: null });   // pt = {lat, lng, label}
-const stopsOf = () => slots.filter(s => s.role === 'stop');
-const slotById = id => slots.find(s => s.id === id);
 const pin = (t, c = '') => c === 'start'
   ? L.divIcon({ className: '', html: '<div class="pin start"></div>', iconSize: [30, 30], iconAnchor: [15, 29] })
   : L.divIcon({ className: '', html: `<div class="pin ${c}">${t}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] });
-const rowEl = s => document.querySelector(`.prow[data-id="${s.id}"]`);
 
-/* ---------- Mapa y seguimiento GPS ---------- */
 function freeMap() { gps.follow = false; $('#recenter').hidden = false; }
 map.on('dragstart', freeMap);
-$('#recenter').onclick = () => {
-  gps.follow = true; $('#recenter').hidden = true;
-  if (gps.pos) map.setView([gps.pos.lat, gps.pos.lng], Math.max(map.getZoom(), 16));
-};
-let bestAcc = Infinity;
-gps.start(p => {
-  const s = slots[0];
-  if (!autoStart) {
-    autoStart = true;
-    if (!s.pt && !s.text) {
-      startFromGps();
-      if (p.acc > 150) msg(`Ubicación aproximada (±${Math.round(p.acc)} m). Es normal en computadores; en un celular con GPS es mucho más precisa. Puedes arrastrar el pin para corregirla.`);
-    }
-  } else if (s.auto && s.pt && !result && p.acc < bestAcc * 0.7) {   // mientras el inicio sea automático, lo afina
-    bestAcc = p.acc; s.pt.lat = p.lat; s.pt.lng = p.lng;
-    ensureMarker(s); invalidate(); addressOf(s, 'Mi ubicación');
-    if (p.acc <= 150) msg('');
-  }
-}, err => msg(err + '. Activa la ubicación para ver dónde estás.'));
+$('#recenter').onclick = () => { gps.follow = true; $('#recenter').hidden = true; if (gps.pos) map.setView([gps.pos.lat, gps.pos.lng], Math.max(map.getZoom(), 16)); };
 
-function startFromGps() {
-  if (!gps.pos) return;
-  const s = slots[0];
-  setPoint(s, gps.pos.lat, gps.pos.lng, 'Mi ubicación');
-  s.auto = true; bestAcc = gps.pos.acc;
-  addressOf(s, 'Mi ubicación');
+function fitAll() {
+  const pts = [...S.stops.filter(loc), S.start, S.end].filter(Boolean).map(p => [p.lat, p.lng]);
+  if (!pts.length) return;
+  freeMap();
+  map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [innerWidth > 700 ? 450 : 30, 30], paddingBottomRight: [30, 30], maxZoom: 16 });
 }
 
-/* ---------- Puntos ---------- */
-function ensureMarker(s) {
-  if (markers.has(s.id)) { markers.get(s.id).setLatLng([s.pt.lat, s.pt.lng]); return; }
-  const m = L.marker([s.pt.lat, s.pt.lng], { draggable: true }).addTo(map);
-  m.on('dragend', () => {
-    const q = m.getLatLng(); s.pt.lat = q.lat; s.pt.lng = q.lng; s.auto = false; invalidate();
-    addressOf(s);
+function syncMap() {
+  layer.clearLayers();
+  const idx = new Map((S.route?.order || []).map((id, i) => [id, i + 1]));
+  if (S.route) layer.addLayer(L.polyline(S.route.geometry, { color: '#fff', weight: 9, opacity: .9 })).addLayer(L.polyline(S.route.geometry, { color: '#2563eb', weight: 5 }));
+  S.stops.filter(loc).forEach(s => {
+    const n = idx.get(s.id), c = s.status === 'done' ? 'done' : s.status === 'failed' ? 'fail' : n ? '' : 'sm';
+    L.marker([s.lat, s.lng], { icon: pin(n ?? '', c) }).on('click', () => openSheet('stop', s.id)).addTo(layer);
   });
-  markers.set(s.id, m);
-}
-const dropMarker = s => { markers.get(s.id)?.remove(); markers.delete(s.id); };
-
-function setPoint(s, lat, lng, label) {
-  s.pt = { lat, lng, label }; s.text = label; s.auto = false;
-  ensureMarker(s); invalidate(); render();
-}
-function clearPoint(s) { s.pt = null; dropMarker(s); invalidate(); }
-
-function setText(s) {
-  s.text = s.pt.label;
-  const i = rowEl(s)?.querySelector('input'); if (i) i.value = s.text;
-}
-async function addressOf(s, fallback = 'Punto en el mapa') {
-  if (!s.pt) return;
-  const { lat, lng } = s.pt;
-  let label = fallback;
-  try { label = (await reverse(lat, lng))?.label || fallback; } catch { /* usa el texto de respaldo */ }
-  if (s.pt && s.pt.lat === lat && s.pt.lng === lng) { s.pt.label = label; setText(s); }
+  if (S.start) L.marker([S.start.lat, S.start.lng], { icon: pin('', 'start') }).addTo(layer);
+  if (S.end) L.marker([S.end.lat, S.end.lng], { icon: pin('', 'end') }).addTo(layer);
 }
 
-function invalidate() {          // cualquier cambio borra el resultado anterior
-  result = null; sim.stop();
-  if (line) { line.remove(); line = null; }
-  $('#result').hidden = true; $('#simInfo').textContent = '';
-  let n = 0;
-  slots.forEach(s => { if (s.pt) markers.get(s.id).setIcon(s.role === 'stop' ? pin(++n) : pin('', s.role)); });
+/* ---------- Pestañas ---------- */
+function setTab(t) {
+  tab = t; $('#panel').hidden = t === 'map';
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['stops', 'route', 'saved'].forEach(v => { $('#v-' + v).hidden = v !== t; });
 }
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.tab); };
 
-function render() {
-  const stops = stopsOf();
-  $('#points').innerHTML = slots.map(s => {
-    const ph = s.role === 'start' ? 'Punto de partida' : s.role === 'end' ? 'Destino' : 'Añadir parada';
-    const last = s === stops[stops.length - 1];
-    const acts = s.role !== 'stop' ? '' :
-      (stops.length > 1 || s.text ? '<button data-act="rm" title="Quitar parada">×</button>' : '') +
-      (last ? '<button data-act="add" title="Añadir otra parada">+</button>' : '');
-    return `<div class="prow${s.id === activeId ? ' active' : ''}" data-id="${s.id}"><span class="dot ${s.role}"></span>
-      <input type="text" placeholder="${ph}" value="${esc(s.text)}" autocomplete="off"><div class="acts">${acts}</div><ul class="sugg" hidden></ul></div>`;
-  }).join('');
+/* ---------- Pestaña Paradas ---------- */
+function renderStops() {
+  const n = S.stops.length, warn = S.stops.filter(s => !loc(s)).length;
+  $('#cStops').textContent = n || '';
+  $('#chips').innerHTML = `<span class="chip"><b>${n}</b> paradas</span><span class="chip"><b>${sum(S.stops, s => s.packages)}</b> paquetes</span>` +
+    (warn ? `<button class="chip warn${onlyWarn ? ' on' : ''}" data-w="1"><b>${warn}</b> sin ubicar</button>` : '');
+  $('#base').innerHTML = ['start', 'end'].map(k => `<button class="b" data-b="${k}"><span class="dot ${k}"></span><div>
+    <small>${k === 'start' ? 'Salida' : 'Destino final (opcional)'}</small><b>${S[k] ? esc(S[k].label) : 'Definir…'}</b></div></button>`).join('');
+  const q = $('#filter').value.trim().toLowerCase();
+  $('#list').innerHTML = S.stops.map((s, i) => ({ s, i })).filter(({ s }) =>
+    (!onlyWarn || !loc(s)) && (!q || (s.client + ' ' + s.address + ' ' + s.notes).toLowerCase().includes(q)))
+    .map(({ s, i }) => `<li class="st ${s.status}${loc(s) ? '' : ' warn'}" data-id="${s.id}"><span class="num">${i + 1}</span>
+      <div class="info"><b>${esc(s.client || 'Sin nombre')}</b><small>${esc(s.address)}</small></div>
+      ${loc(s) ? '' : '<em>Sin ubicar</em>'}<span class="pk">${s.packages} paq.</span></li>`).join('') ||
+    '<li class="sub" style="padding:16px 0">Aún no hay paradas. Agrégalas una a una o importa un Excel.</li>';
 }
+$('#chips').addEventListener('click', e => { if (e.target.closest('[data-w]')) { onlyWarn = !onlyWarn; renderStops(); } });
+$('#base').addEventListener('click', e => { const b = e.target.closest('button'); if (b) openSheet(b.dataset.b); });
+$('#list').addEventListener('click', e => { const li = e.target.closest('li[data-id]'); if (li) openSheet('stop', li.dataset.id); });
+$('#filter').oninput = renderStops;
+$('#add').onclick = () => openSheet('stop');
+$('#tpl').onclick = template;
+$('#clr').onclick = () => { if (S.stops.length && confirm(`¿Quitar las ${S.stops.length} paradas?`)) { S.stops = []; S.route = null; commit(); } };
 
-function resetSlots(d) {
-  markers.forEach(m => m.remove()); markers.clear();
-  const mk = (role, p) => {
-    const s = mkSlot(role);
-    if (p) { s.pt = { lat: p.lat, lng: p.lng, label: p.label }; s.text = p.label; ensureMarker(s); }
-    return s;
-  };
-  slots = [mk('start', d?.start), ...(d?.stops?.length ? d.stops : [null]).map(p => mk('stop', p)), mk('end', d?.end)];
-  invalidate(); render();
+/* ---------- Importar Excel ---------- */
+let ctl = null;
+$('#imp').onclick = () => $('#file').click();
+$('#file').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const rows = await readRows(f);
+    if (!rows.length) { toast('No encontré filas con dirección.'); return; }
+    if (S.stops.length && confirm(`Se encontraron ${rows.length} entregas.\n\nAceptar: reemplazar las ${S.stops.length} actuales.\nCancelar: agregarlas al final.`)) S.stops = [];
+    S.stops.push(...rows.map(r => ({ id: nid(), status: 'pending', ...r })));
+    S.route = null; commit(); setTab('stops'); locateStops();
+  } catch (err) { toast(err.message); }
+};
+async function locateStops() {
+  if (ctl || !S.stops.some(s => !loc(s))) return;
+  ctl = { stop: false }; $('#prog').hidden = false;
+  const r = await locate(S.stops, (n, t) => {
+    $('#progTxt').textContent = `Ubicando direcciones… ${n}/${t}`; $('#progBar').style.width = (n / t * 100) + '%';
+    persist(); if (n % 10 === 0) renderStops();
+  }, ctl);
+  $('#prog').hidden = true; ctl = null; S.route = null; commit(); fitAll();
+  toast(`${r.ok} de ${r.total} direcciones ubicadas.` + (r.ok < r.total ? ' Revisa las marcadas "Sin ubicar".' : ''));
 }
+$('#progX').onclick = () => { if (ctl) ctl.stop = true; };
 
-/* ---------- Fila activa: el mapa solo fija puntos cuando una fila está seleccionada ---------- */
-function setActive(id) {
-  activeId = id;
-  document.querySelectorAll('.prow').forEach(r => r.classList.toggle('active', +r.dataset.id === id));
-  $('#hint').hidden = !id; $('#map').classList.toggle('picking', !!id);
+/* ---------- Hoja para agregar o editar ---------- */
+let sh = null, pick = null, prevTab = 'stops', sugT, sugSeq = 0, sugItems = [];
+const locTxt = () => { $('#fLoc').textContent = sh.pt ? 'Ubicación fijada' : 'Sin ubicación'; $('#fLoc').className = sh.pt ? 'ok' : 'warnTxt'; };
+
+function openSheet(mode, id) {
+  const s = id && S.stops.find(x => x.id === id), b = mode !== 'stop' ? S[mode] : null;
+  sh = { mode, id, pt: s ? (loc(s) ? { lat: s.lat, lng: s.lng } : null) : b ? { lat: b.lat, lng: b.lng } : null };
+  $('#shTitle').textContent = mode === 'start' ? 'Punto de salida' : mode === 'end' ? 'Destino final' : id ? 'Editar parada' : 'Nueva parada';
+  $('#fAddr').value = s ? s.address : b ? b.label : '';
+  $('#fClient').value = s?.client || ''; $('#fPhone').value = s?.phone || ''; $('#fPk').value = s?.packages || 1; $('#fNotes').value = s?.notes || '';
+  $('#fExtra').hidden = mode !== 'stop'; $('#fGps').hidden = mode !== 'start'; $('#fDel').hidden = !(id || b);
+  $('#fSugg').innerHTML = ''; locTxt(); $('#sheet').hidden = false;
+  if (!s && !b) $('#fAddr').focus();
 }
-$('#panel').addEventListener('pointerdown', e => { if (!e.target.closest('.prow')) setActive(null); });
+const closeSheet = () => { $('#sheet').hidden = true; sh = null; };
+$('#shX').onclick = closeSheet;
 
-map.on('click', e => {
-  const s = slotById(activeId); if (!s) return;
-  setActive(null);
-  setPoint(s, e.latlng.lat, e.latlng.lng, 'Buscando dirección…');
-  addressOf(s);
-});
-
-/* ---------- Autocompletado ---------- */
-function showSugg(row, s, items) {
-  cur = { id: s.id, items };
-  const ul = row.querySelector('.sugg');
-  ul.innerHTML = items.map((r, i) => `<li data-i="${i}"><b>${esc(r.main)}</b><span>${esc(r.sub)}</span></li>`).join('');
-  ul.hidden = !items.length;
-}
-const meItem = () => gps.pos && { main: 'Mi ubicación actual', sub: '', label: 'Mi ubicación', lat: gps.pos.lat, lng: gps.pos.lng, me: true };
-
-$('#points').addEventListener('focusin', e => {
-  if (e.target.tagName !== 'INPUT') return;
-  const row = e.target.closest('.prow'), s = slotById(+row.dataset.id);
-  setActive(s.id);
-  if (!s.text && meItem()) showSugg(row, s, [meItem()]);
-});
-$('#points').addEventListener('focusout', e => { const u = e.target.closest('.prow')?.querySelector('.sugg'); if (u) u.hidden = true; });
-
-$('#points').addEventListener('input', e => {
-  if (e.target.tagName !== 'INPUT') return;
-  const row = e.target.closest('.prow'), s = slotById(+row.dataset.id);
-  s.text = e.target.value; s.auto = false;
-  if (s.pt) clearPoint(s);
-  clearTimeout(timer);
-  const q = s.text.trim();
-  if (q.length < 3) { showSugg(row, s, !q && meItem() ? [meItem()] : []); return; }
-  timer = setTimeout(async () => {
-    const my = ++seq;
+$('#fAddr').addEventListener('input', e => {
+  sh.pt = null; locTxt(); clearTimeout(sugT);
+  const q = e.target.value.trim();
+  if (q.length < 3) { $('#fSugg').innerHTML = ''; return; }
+  sugT = setTimeout(async () => {
+    const my = ++sugSeq;
     try {
-      const items = await search(q);
-      if (my !== seq) return;
-      msg(items.length ? '' : 'Sin sugerencias. Toca este recuadro y luego el mapa para fijar el punto.');
-      showSugg(row, s, items);
-    } catch (err) { msg(err.message); }
+      const it = await search(q); if (my !== sugSeq) return;
+      sugItems = it;
+      $('#fSugg').innerHTML = it.map((r, i) => `<li data-i="${i}"><b>${esc(r.main)}</b><span>${esc(r.sub)}</span></li>`).join('');
+    } catch (err) { toast(err.message); }
   }, 350);
 });
-
-$('#points').addEventListener('pointerdown', e => {      // pointerdown: se ejecuta antes de que el input pierda el foco
-  const li = e.target.closest('.sugg li'); if (!li) return;
+$('#fSugg').addEventListener('pointerdown', e => {
+  const li = e.target.closest('li'); if (!li) return;
   e.preventDefault();
-  const s = slotById(cur.id), r = cur.items[+li.dataset.i]; if (!s || !r) return;
-  setActive(null); freeMap();
-  setPoint(s, r.lat, r.lng, r.label);
-  if (r.me) addressOf(s, 'Mi ubicación');
-  map.setView([r.lat, r.lng], Math.max(map.getZoom(), 15));
+  const r = sugItems[+li.dataset.i];
+  sh.pt = { lat: r.lat, lng: r.lng }; $('#fAddr').value = r.label; $('#fSugg').innerHTML = ''; locTxt();
 });
 
-$('#points').addEventListener('click', e => {
-  const b = e.target.closest('button[data-act]'); if (!b) return;
-  const s = slotById(+b.closest('.prow').dataset.id);
-  if (b.dataset.act === 'add') {
-    const n = mkSlot('stop'); slots.splice(slots.indexOf(s) + 1, 0, n); render();
-    rowEl(n).querySelector('input').focus();
-  } else {
-    dropMarker(s);
-    if (stopsOf().length > 1) slots.splice(slots.indexOf(s), 1); else { s.pt = null; s.text = ''; }
-    invalidate(); render();
-  }
-});
-
-/* ---------- Cálculo y resultado ---------- */
-$('#calc').onclick = async () => {
-  const st = slots[0], en = slots[slots.length - 1];
-  const bad = slots.find(s => s.text.trim() && !s.pt);
-  if (bad) { msg(`Elige una sugerencia para "${bad.text}" o fíjala en el mapa.`); return; }
-  if (!st.pt) { msg('Falta el punto de partida.'); return; }
-  const svc = +$('#service').value || 0;
-  const mp = (s, role) => ({ id: s.id, lat: s.pt.lat, lng: s.pt.lng, label: s.pt.label, role, service: role === 'stop' ? svc : 0 });
-  const pts = [mp(st, 'start'), ...stopsOf().filter(s => s.pt).map(s => mp(s, 'stop')), ...(en.pt ? [mp(en, 'end')] : [])];
-  if (pts.length < 2) { msg('Agrega al menos una parada o el destino.'); return; }
-  msg('Calculando…');
-  try {
-    result = await routing.solve(pts, { optimize: $('#optimize').checked, fixedEnd: !!en.pt });
-    result.pts = pts; msg(''); showResult();
-  } catch (err) { msg(err.message); }
-};
-
-const li = (cls, n, label, sub, t) =>
-  `<li><span class="n ${cls}">${n}</span><div><b>${esc(label)}</b><small>${sub}</small></div><time>${fmt(t)}</time></li>`;
-
-function showResult() {
-  const { order, legs, geometry, pts } = result;
-  line = L.layerGroup([L.polyline(geometry, { color: '#fff', weight: 10, opacity: .9 }), L.polyline(geometry, { color: '#2563eb', weight: 5 })]).addTo(map);
-  freeMap();
-  const wide = innerWidth > 700;
-  map.fitBounds(L.polyline(geometry).getBounds(), { paddingTopLeft: [wide ? 420 : 30, 30], paddingBottomRight: [30, wide ? 30 : innerHeight * .55] });
-
-  const [h, m] = $('#depart').value.split(':').map(Number);
-  let t = new Date(); t.setHours(h, m, 0, 0);
-  const items = [];
-  order.forEach((idx, pos) => {
-    const p = pts[idx];
-    if (pos === 0) { markers.get(p.id).setIcon(pin('', 'start')); items.push(li('start', '', p.label, 'Salida', t)); return; }
-    t = new Date(t.getTime() + legs[pos - 1].duration * 1000);
-    const end = p.role === 'end';
-    markers.get(p.id).setIcon(end ? pin('', 'end') : pin(pos));
-    items.push(li(end ? 'end' : '', end ? '' : pos, p.label, min(legs[pos - 1].duration) + ' min desde la anterior', t));
-    t = new Date(t.getTime() + p.service * 60000);
-  });
-  $('#eta').innerHTML = items.join('');
-  const dist = legs.reduce((a, l) => a + l.distance, 0) / 1000;
-  $('#summary').textContent = `${dist.toFixed(1)} km · ${min(legs.reduce((a, l) => a + l.duration, 0))} min de manejo`;
-  $('#result').hidden = false;
-}
-
-$('#sim').onclick = () => {
-  if (!result) return;
-  const { order, legs, geometry, pts } = result;
-  const total = legs.reduce((a, l) => a + l.duration, 0);
-  let acc = 0; const cum = legs.map(l => (acc += l.duration));
-  sim.start(geometry, total, +$('#speed').value, el => {
-    const k = cum.findIndex(c => c > el);
-    $('#simInfo').textContent = k === -1 ? 'Recorrido completado.'
-      : `Próxima parada: ${pts[order[k + 1]].label} en ${min(cum[k] - el)} min`;
-  });
-};
-
-/* ---------- Rutas guardadas ---------- */
-const strip = (s, svc) => s.pt ? { lat: s.pt.lat, lng: s.pt.lng, label: s.pt.label, service: svc } : null;
-const snapshot = () => {
-  const svc = +$('#service').value || 0;
-  return {
-    start: strip(slots[0], 0), end: strip(slots[slots.length - 1], 0),
-    stops: stopsOf().filter(s => s.pt).map(s => strip(s, svc)),
-    options: { optimize: $('#optimize').checked, depart: $('#depart').value, service: svc }
+$('#fMap').onclick = () => {
+  $('#sheet').hidden = true; prevTab = tab; setTab('map'); freeMap();
+  $('#banner').hidden = false; $('#map').classList.add('picking');
+  if (sh.pt) map.setView([sh.pt.lat, sh.pt.lng], 16);
+  pick = (lat, lng) => {
+    sh.pt = { lat, lng }; locTxt();
+    if (!$('#fAddr').value.trim()) reverse(lat, lng).then(r => { if (r && sh && !$('#fAddr').value.trim()) $('#fAddr').value = r.label; }).catch(() => {});
   };
 };
-const updateEditing = () => { $('#editing').textContent = currentId ? 'Editando: ' + $('#rname').value : 'Ruta nueva (sin guardar)'; };
-const showView = v => { $('#viewPlan').hidden = v !== 'plan'; $('#viewSaved').hidden = v !== 'saved'; };
+function endPick() { pick = null; $('#banner').hidden = true; $('#map').classList.remove('picking'); setTab(prevTab); $('#sheet').hidden = false; }
+map.on('click', e => { if (!pick) return; const p = pick; endPick(); p(e.latlng.lat, e.latlng.lng); });
+$('#bannerX').onclick = endPick;
 
-async function save(asNew) {
-  const d = snapshot();
-  if (!d.start && !d.end && !d.stops.length) { msg('No hay nada que guardar.'); return; }
-  const name = $('#rname').value.trim() || 'Ruta sin nombre';
-  $('#rname').value = name;
-  const r = await storage.save({ id: asNew ? undefined : currentId || undefined, name, data: d });
-  currentId = r.id; updateEditing(); msg('Ruta guardada.'); refreshSaved();
-}
-
-async function refreshSaved() {
-  saved = await storage.list();
-  $('#saved').innerHTML = saved.length ? saved.map(r => `
-    <li data-id="${r.id}"><strong>${esc(r.name)}</strong>
-      <div class="meta">${r.data.stops.length} paradas · ${new Date(r.updatedAt).toLocaleDateString('es-CL')}</div>
-      <button data-act="open">Abrir</button><button data-act="rename">Renombrar</button><button data-act="del">Eliminar</button>
-    </li>`).join('') : '<li class="meta">Aún no hay rutas guardadas.</li>';
-}
-
-function load(r) {
-  const d = r.data;
-  resetSlots(d);
-  $('#optimize').checked = d.options.optimize; $('#depart').value = d.options.depart; $('#service').value = d.options.service ?? 5;
-  $('#rname').value = r.name; currentId = r.id; updateEditing(); msg(''); showView('plan');
-  if (markers.size) { freeMap(); map.fitBounds(L.featureGroup([...markers.values()]).getBounds(), { padding: [60, 60], maxZoom: 16 }); }
-}
-
-$('#save').onclick = () => save(false);
-$('#saveNew').onclick = () => save(true);
-$('#rname').oninput = () => { if (currentId) updateEditing(); };
-$('#openSaved').onclick = () => { refreshSaved(); showView('saved'); };
-$('#back').onclick = () => showView('plan');
-$('#newRoute').onclick = () => {
-  resetSlots(null); currentId = null; $('#rname').value = ''; updateEditing(); msg('');
-  startFromGps();
+$('#fGps').onclick = () => {
+  if (!gps.pos) { toast('Aún no hay ubicación del GPS.'); return; }
+  sh.pt = { lat: gps.pos.lat, lng: gps.pos.lng }; locTxt();
+  reverse(gps.pos.lat, gps.pos.lng).then(r => { $('#fAddr').value = r?.label || 'Mi ubicación'; }).catch(() => { $('#fAddr').value = 'Mi ubicación'; });
 };
 
+$('#fSave').onclick = async () => {
+  const addr = $('#fAddr').value.trim();
+  if (!addr && !sh.pt) { toast('Escribe una dirección o fíjala en el mapa.'); return; }
+  if (!sh.pt) {                       // no eligió sugerencia: intenta ubicar lo escrito
+    $('#fSave').textContent = 'Ubicando…';
+    try { const r = (await search(addr))[0]; if (r) sh.pt = { lat: r.lat, lng: r.lng }; } catch { /* queda sin ubicar */ }
+    $('#fSave').textContent = 'Guardar';
+  }
+  if (sh.mode === 'stop') {
+    const d = { client: $('#fClient').value.trim(), phone: $('#fPhone').value.trim(), address: addr, packages: Math.max(1, +$('#fPk').value || 1),
+      notes: $('#fNotes').value.trim(), lat: sh.pt?.lat ?? null, lng: sh.pt?.lng ?? null };
+    if (sh.id) Object.assign(S.stops.find(x => x.id === sh.id), d); else S.stops.push({ id: nid(), status: 'pending', ...d });
+    if (!sh.pt) toast('No pude ubicar esa dirección. Ábrela y usa "Fijar en el mapa".');
+  } else {
+    if (!sh.pt) { toast('No encontré esa dirección. Elige una sugerencia o fíjala en el mapa.'); return; }
+    S[sh.mode] = { lat: sh.pt.lat, lng: sh.pt.lng, label: addr };
+  }
+  S.route = null; commit(); closeSheet();
+};
+$('#fDel').onclick = () => {
+  if (sh.mode === 'stop') S.stops = S.stops.filter(x => x.id !== sh.id); else S[sh.mode] = null;
+  S.route = null; commit(); closeSheet();
+};
+
+/* ---------- Pestaña Ruta ---------- */
+const syncOpts = () => { $('#depart').value = S.opts.depart; $('#service').value = S.opts.service; $('#optimize').checked = S.opts.optimize; };
+$('#v-route').addEventListener('change', e => {
+  if (!['depart', 'service', 'optimize'].includes(e.target.id)) return;
+  S.opts = { depart: $('#depart').value || '08:00', service: +$('#service').value || 0, optimize: $('#optimize').checked };
+  S.route = null; commit();
+});
+
+$('#calc').onclick = async () => {
+  if (!S.start) { toast('Primero define el punto de salida.'); setTab('stops'); return; }
+  const todo = S.stops.filter(s => loc(s) && s.status === 'pending');
+  if (!todo.length) { toast('No hay paradas pendientes con ubicación.'); return; }
+  const pts = [{ ...S.start, id: 'start' }, ...todo.map(s => ({ lat: s.lat, lng: s.lng, id: s.id })), ...(S.end ? [{ ...S.end, id: 'end' }] : [])];
+  $('#calc').textContent = 'Calculando…'; $('#calc').disabled = true;
+  try {
+    const r = await routing.solve(pts, { optimize: S.opts.optimize, fixedEnd: !!S.end });
+    const [h, m] = S.opts.depart.split(':').map(Number);
+    let t = new Date(); t.setHours(h, m, 0, 0);
+    const eta = {}; let endT = t;
+    r.order.forEach((idx, pos) => {
+      if (!pos) return;
+      t = new Date(+t + r.legs[pos - 1].duration * 1000); endT = t;
+      if (pts[idx].id !== 'end') { eta[pts[idx].id] = t.toISOString(); t = new Date(+t + S.opts.service * 60000); }
+    });
+    S.route = {
+      order: r.order.map(i => pts[i].id).filter(id => id !== 'start' && id !== 'end'), eta, geometry: r.geometry,
+      km: sum(r.legs, l => l.distance) / 1000, driveMin: sum(r.legs, l => l.duration) / 60, end: endT.toISOString(),
+      skipped: S.stops.filter(s => !loc(s) && s.status === 'pending').length
+    };
+    commit(); fitAll();
+  } catch (err) { toast(err.message + (todo.length > 80 ? ' (el servidor de pruebas puede rechazar rutas muy largas)' : '')); }
+  $('#calc').textContent = 'Calcular ruta'; $('#calc').disabled = false;
+};
+
+function routeItems() { return (S.route?.order || []).map(id => S.stops.find(s => s.id === id)).filter(Boolean); }
+
+function renderRoute() {
+  const r = S.route;
+  $('#rsum').hidden = !r; $('#exp').hidden = !r;
+  if (!r) { $('#rlist').innerHTML = ''; return; }
+  const items = routeItems(), done = items.filter(s => s.status === 'done').length, failed = items.filter(s => s.status === 'failed').length;
+  $('#rsum').innerHTML = `<b>${items.length} paradas · ${sum(items, s => s.packages)} paquetes</b>
+    <div>${r.km.toFixed(1)} km · ${dur(r.driveMin)} conduciendo · termina ${hhmm(r.end)}</div>
+    <div class="track"><i style="width:${items.length ? done / items.length * 100 : 0}%"></i></div>
+    <small>${done} entregadas · ${failed} no entregadas${r.skipped ? ` · ${r.skipped} sin ubicar quedaron fuera` : ''}</small>`;
+  $('#rlist').innerHTML = items.map((s, i) => `<li class="rt ${s.status}" data-id="${s.id}">
+    <div class="top"><span class="num">${i + 1}</span><div class="info"><b>${esc(s.client || 'Sin nombre')}</b><small>${esc(s.address)}</small>${s.notes ? `<small class="nt">${esc(s.notes)}</small>` : ''}</div>
+    <div class="eta"><time>${hhmm(r.eta[s.id])}</time><small>${s.packages} paq.</small></div></div>
+    <div class="acts"><button data-act="nav">Navegar</button>${s.phone ? '<button data-act="wa">WhatsApp</button>' : ''}
+    <button data-act="ok" class="${s.status === 'done' ? 'on' : ''}">Entregado</button><button data-act="no" class="${s.status === 'failed' ? 'bad' : ''}">No entregado</button></div></li>`).join('');
+}
+
+function waLink(s) {
+  let n = s.phone.replace(/\D/g, ''); if (n.length === 9) n = '56' + n;
+  return `https://wa.me/${n}?text=` + encodeURIComponent(`Hola ${s.client || ''}, tu pedido llegará aproximadamente a las ${hhmm(S.route.eta[s.id])}.`);
+}
+$('#rlist').addEventListener('click', e => {
+  const li = e.target.closest('li'); if (!li) return;
+  const s = S.stops.find(x => x.id === li.dataset.id), a = e.target.closest('button')?.dataset.act;
+  if (a === 'nav') open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`, '_blank');
+  else if (a === 'wa') open(waLink(s), '_blank');
+  else if (a === 'ok' || a === 'no') { const v = a === 'ok' ? 'done' : 'failed'; s.status = s.status === v ? 'pending' : v; commit(); }
+  else { freeMap(); setTab('map'); map.setView([s.lat, s.lng], 17); }
+});
+$('#exp').onclick = () => exportRoute(routeItems().map((s, i) =>
+  [i + 1, hhmm(S.route.eta[s.id]), s.client, s.address, s.phone, s.packages, s.notes, { pending: 'Pendiente', done: 'Entregado', failed: 'No entregado' }[s.status]]));
+
+/* ---------- Pestaña Guardadas ---------- */
+const updateEditing = () => { $('#editing').textContent = S.savedId ? 'Editando: ' + S.name : 'Jornada nueva (sin guardar). El borrador se conserva solo.'; };
+
+async function saveDay(asNew) {
+  if (!S.stops.length) { toast('No hay paradas que guardar.'); return; }
+  const name = $('#rname').value.trim() || 'Jornada ' + new Date().toLocaleDateString('es-CL');
+  $('#rname').value = name; S.name = name;
+  const r = await storage.save({ id: asNew ? undefined : S.savedId || undefined, name, data: JSON.parse(JSON.stringify(S)) });
+  S.savedId = r.id; persist(); updateEditing(); refreshSaved(); toast('Jornada guardada.');
+}
+async function refreshSaved() {
+  saved = await storage.list();
+  $('#saved').innerHTML = saved.length ? saved.map(r => `<li data-id="${r.id}"><strong>${esc(r.name)}</strong>
+    <div class="sub">${r.data.stops.length} paradas · ${sum(r.data.stops, s => s.packages)} paquetes · ${new Date(r.updatedAt).toLocaleDateString('es-CL')}</div>
+    <button data-act="open">Abrir</button><button data-act="rename">Renombrar</button><button data-act="del">Eliminar</button></li>`).join('')
+    : '<li class="sub">Aún no hay jornadas guardadas.</li>';
+}
+$('#save').onclick = () => saveDay(false);
+$('#saveNew').onclick = () => saveDay(true);
+$('#newDay').onclick = () => {
+  if (S.stops.length && !confirm('¿Empezar una jornada nueva? Se conservan la salida, el destino y las opciones.')) return;
+  S = Object.assign(fresh(), { start: S.start, end: S.end, opts: S.opts });
+  $('#rname').value = ''; updateEditing(); commit(); setTab('stops');
+};
 $('#saved').addEventListener('click', async e => {
   const act = e.target.dataset.act; if (!act) return;
   const r = saved.find(x => x.id === e.target.closest('li').dataset.id);
-  if (act === 'open') { load(r); return; }
+  if (act === 'open') {
+    S = Object.assign(fresh(), r.data, { savedId: r.id, name: r.name });
+    $('#rname').value = r.name; syncOpts(); updateEditing(); commit(); fitAll(); setTab('stops'); return;
+  }
   if (act === 'rename') {
     const name = prompt('Nuevo nombre:', r.name)?.trim();
-    if (name) { await storage.save({ id: r.id, name }); if (r.id === currentId) { $('#rname').value = name; updateEditing(); } }
+    if (name) { await storage.save({ id: r.id, name }); if (r.id === S.savedId) { S.name = name; $('#rname').value = name; updateEditing(); persist(); } }
   }
-  if (act === 'del' && confirm(`¿Eliminar "${r.name}"?`)) {
-    await storage.remove(r.id);
-    if (r.id === currentId) { currentId = null; updateEditing(); }
-  }
+  if (act === 'del' && confirm(`¿Eliminar "${r.name}"?`)) { await storage.remove(r.id); if (r.id === S.savedId) { S.savedId = null; updateEditing(); persist(); } }
   refreshSaved();
 });
 
-resetSlots(null);
-refreshSaved();
+/* ---------- Inicio ---------- */
+function renderAll() { renderStops(); renderRoute(); syncMap(); }
+
+let first = true;
+gps.start(p => {
+  if (!first) return; first = false;
+  if (p.acc > 150) toast(`Ubicación aproximada (±${Math.round(p.acc)} m). Es normal en computadores.`);
+  if (!S.start) {
+    S.start = { lat: p.lat, lng: p.lng, label: 'Mi ubicación' }; commit();
+    reverse(p.lat, p.lng).then(r => { if (r && S.start?.label === 'Mi ubicación') { S.start.label = r.label; commit(); } }).catch(() => {});
+  }
+}, err => toast(err + '. Activa la ubicación para ver dónde estás.'));
+
+syncOpts(); $('#rname').value = S.name || ''; updateEditing(); renderAll(); setTab('stops'); refreshSaved();
+if (S.stops.length || S.start) fitAll();
