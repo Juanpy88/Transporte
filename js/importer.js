@@ -13,7 +13,7 @@ const COLS = {
 };
 
 export async function readRows(file) {
-  const wb = XLSX.read(await file.arrayBuffer());
+  const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
   const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
   if (!raw.length) return [];
   const keys = Object.keys(raw[0]), col = {};

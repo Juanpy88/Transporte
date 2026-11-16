@@ -314,3 +314,5 @@ gps.start(p => {
 
 syncOpts(); $('#rname').value = S.name || ''; updateEditing(); renderAll(); setTab('stops'); refreshSaved();
 if (S.stops.length || S.start) fitAll();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
