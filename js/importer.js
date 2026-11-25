@@ -1,6 +1,5 @@
 // Importación y exportación de Excel/CSV (SheetJS, cargado en index.html) y ubicación masiva de direcciones.
-import { search } from './providers/geocoder.js';
-import { CONFIG } from './config.js';
+import { search, providerId } from './providers/geocoder.js';
 
 const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const COLS = {
@@ -41,7 +40,7 @@ export async function locate(stops, onProgress, ctl) {
   const todo = stops.filter(s => s.lat == null); let ok = 0, n = 0;
   for (const s of todo) {
     if (ctl.stop) break;
-    const key = (CONFIG.hereKey ? 'h|' : 'p|') + s.address;
+    const key = providerId() + '|' + s.address;
     let hit = cache[key];
     if (hit === undefined) {
       try {

@@ -1,10 +1,11 @@
 // Sugerencias de direcciones y geocodificación inversa.
 // Sin clave usa Photon (datos de OpenStreetMap, con pocos números de casa en Chile).
-// Con CONFIG.hereKey usa HERE, que resuelve el número de casa (exacto o interpolado).
+// Con CONFIG.tomtomKey usa TomTom, o con CONFIG.hereKey usa HERE: ambos resuelven el número de casa (exacto o interpolado).
 // Cada resultado trae exact = true si llegó hasta el número de la casa.
 import { CONFIG } from '../config.js';
 
 const PHOTON = 'https://photon.komoot.io';
+const TOMTOM = 'https://api.tomtom.com/search/2';
 const HERE = 'https://geocode.search.hereapi.com/v1/geocode';
 const HERE_REV = 'https://revgeocode.search.hereapi.com/v1/revgeocode';
 
@@ -30,6 +31,19 @@ const fromHere = i => {
   };
 };
 
+const fromTomTom = r => {
+  const a = r.address || {};
+  const main = a.streetName ? a.streetName + (a.streetNumber ? ' ' + a.streetNumber : '') : (r.poi?.name || a.freeformAddress);
+  const area = a.municipalitySubdivision;
+  return {
+    main, sub: [area, a.municipality].filter(Boolean).join(', '),
+    label: [main, area].filter(Boolean).join(', ') || a.freeformAddress,
+    lat: r.position.lat, lng: r.position.lon, exact: r.type === 'Point Address' || r.type === 'Address Range'   // punto exacto o interpolado
+  };
+};
+
+export const providerId = () => (CONFIG.tomtomKey ? 't' : CONFIG.hereKey ? 'h' : 'p');   // distingue la caché de cada proveedor
+
 const inBounds = r => { const b = CONFIG.bounds; return r.lat >= b[0][0] && r.lat <= b[1][0] && r.lng >= b[0][1] && r.lng <= b[1][1]; };
 
 // Si escribió un número y el servicio solo halló la calle, conserva lo escrito y lo marca "(aprox.)".
@@ -43,6 +57,12 @@ async function get(url, params) {
 }
 
 export async function search(q) {
+  if (CONFIG.tomtomKey) {
+    const [lat, lon] = CONFIG.center;
+    const d = await get(`${TOMTOM}/search/${encodeURIComponent(q)}.json`, { key: CONFIG.tomtomKey, countrySet: 'CL', lat, lon, radius: 35000,
+      limit: 8, language: 'es-ES', typeahead: 'true', idxSet: 'PAD,Addr,Str' });
+    return approxify((d.results || []).map(fromTomTom).filter(inBounds).slice(0, 6), q);
+  }
   if (CONFIG.hereKey) {
     const d = await get(HERE, { q: q + ', Antofagasta', in: 'countryCode:CHL', at: CONFIG.center.join(','), limit: 8, lang: 'es', apiKey: CONFIG.hereKey });
     return approxify((d.items || []).filter(i => i.position).map(fromHere).filter(inBounds).slice(0, 6), q);
@@ -52,6 +72,12 @@ export async function search(q) {
 }
 
 export async function reverse(lat, lng) {
+  if (CONFIG.tomtomKey) {
+    const x = (await get(`${TOMTOM}/reverseGeocode/${lat},${lng}.json`, { key: CONFIG.tomtomKey, language: 'es-ES' })).addresses?.[0];
+    if (!x) return null;
+    const [la, lo] = String(x.position).split(',').map(Number);
+    return fromTomTom({ address: x.address, position: { lat: la, lon: lo }, type: 'Point Address' });
+  }
   if (CONFIG.hereKey) {
     const d = await get(HERE_REV, { at: lat + ',' + lng, limit: 1, lang: 'es', apiKey: CONFIG.hereKey });
     return d.items?.length ? fromHere(d.items[0]) : null;
