@@ -1,5 +1,6 @@
 // Importación y exportación de Excel/CSV (SheetJS, cargado en index.html) y ubicación masiva de direcciones.
 import { search } from './providers/geocoder.js';
+import { CONFIG } from './config.js';
 
 const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const COLS = {
@@ -30,20 +31,31 @@ export async function readRows(file) {
   }).filter(Boolean);
 }
 
-const CK = 'antofa-rutas:geocache', sleep = ms => new Promise(r => setTimeout(r, ms));
+const CK = 'antofa-rutas:geocache2', sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Ubica una a una las paradas sin coordenadas (con caché para no repetir búsquedas).
+// Si la dirección trae número y solo se halló la calle, le agrega "(aprox.)" para poder revisarla
+// (en Paradas, escribir "aprox" en el buscador las muestra todas).
 export async function locate(stops, onProgress, ctl) {
   let cache = {}; try { cache = JSON.parse(localStorage.getItem(CK)) || {}; } catch { /* sin caché */ }
   const todo = stops.filter(s => s.lat == null); let ok = 0, n = 0;
   for (const s of todo) {
     if (ctl.stop) break;
-    let hit = cache[s.address];
+    const key = (CONFIG.hereKey ? 'h|' : 'p|') + s.address;
+    let hit = cache[key];
     if (hit === undefined) {
-      try { const r = (await search(s.address))[0]; hit = r ? { lat: r.lat, lng: r.lng } : null; cache[s.address] = hit; } catch { hit = undefined; }
+      try {
+        const r = (await search(s.address))[0];
+        hit = r ? { lat: r.lat, lng: r.lng, approx: /\d/.test(s.address) && !r.exact } : null;
+        cache[key] = hit;
+      } catch { hit = undefined; }
       await sleep(300);
     }
-    if (hit) { s.lat = hit.lat; s.lng = hit.lng; ok++; }
+    if (hit) {
+      s.lat = hit.lat; s.lng = hit.lng;
+      if (hit.approx && !/aprox\./.test(s.address)) s.address += ' (aprox.)';
+      ok++;
+    }
     onProgress(++n, todo.length);
   }
   try { localStorage.setItem(CK, JSON.stringify(cache)); } catch { /* caché llena */ }
