@@ -1,10 +1,11 @@
-// Selector de proveedor de rutas. Para migrar: crear otro archivo con la misma
-// función solve() y registrarlo aquí. El resto de la app no cambia.
+// Selector de proveedor de rutas. Con CONFIG.tomtomKey usa TomTom (tráfico en vivo, hasta 150 paradas);
+// sin clave sigue usando el servidor de pruebas OSRM. El resto de la app no cambia.
 import { CONFIG } from '../config.js';
 import * as osrm from './osrm.js';
+import * as tomtom from './tomtom.js';
 
-const providers = { osrm /*, ors, google, mapbox */ };
-export const routing = providers[CONFIG.provider];
+const providers = { osrm, tomtom /*, google, here */ };
+export const routing = providers[CONFIG.tomtomKey ? 'tomtom' : CONFIG.provider];
 
 /* Contrato de solve(points, { optimize, fixedEnd }):
    points: [{lat, lng}]. El índice 0 es el inicio fijo; si fixedEnd es true,
